@@ -12,22 +12,27 @@ def test_exec_command(mocker):
 
 
 @pytest.mark.parametrize(
-    "path, prefix, key, expected",
+    "base_path, path, prefix, expected",
     [
-        ("", None, "a", "A"),
-        ("a", None, "a", "A"),
-        ("", None, "a/b", "A_B"),
-        ("a", None, "a/b", "A_B"),
-        ("a/b", None, "a/b/c", "B_C"),
-        ("", "foo", "a", "FOO_A"),
-        ("a", "foo", "a", "FOO"),
-        ("", "foo", "a/b", "FOO_A_B"),
-        ("a", "foo", "a/b", "FOO_B"),
-        ("a/b", "foo", "a/b/c", "FOO_C"),
+        ("", "a", None, "A_MYATTR"),
+        ("a", "a", None, "A_MYATTR"),
+        ("", "a/b", None, "A_B_MYATTR"),
+        ("a", "a/b", None, "A_B_MYATTR"),
+        ("a/b", "a/b/c", None, "B_C_MYATTR"),
+        ("", "a", "foo", "FOO_A_MYATTR"),
+        ("a", "a", "foo", "FOO_MYATTR"),
+        ("", "a/b", "foo", "FOO_A_B_MYATTR"),
+        ("a", "a/b", "foo", "FOO_B_MYATTR"),
+        ("a/b", "a/b/c", "foo", "FOO_C_MYATTR"),
     ],
 )
-def test_make_env_key(path, prefix, key, expected):
-    assert environment.make_env_key(path=path, prefix=prefix, key=key) == expected
+def test_make_env_key(base_path, path, prefix, expected):
+    assert (
+        environment.make_env_key(
+            base_path=base_path, path=path, name="myattr", prefix=prefix
+        )
+        == expected
+    )
 
 
 @pytest.mark.parametrize(

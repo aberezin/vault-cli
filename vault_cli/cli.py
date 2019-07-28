@@ -1,6 +1,7 @@
 import contextlib
 import logging
 import os
+import shlex
 from typing import Any, Dict, Mapping, NoReturn, Optional, Sequence, TextIO
 
 import click
@@ -211,13 +212,16 @@ def get_all(client_obj: client.VaultClientBase, path: Sequence[str]):
         "If the secret is not a string, it will always be yaml."
     ),
 )
+@click.option("-k", "--key", default=None, help="get a specific key")
 @click.argument("name")
 @handle_errors()
-def get(client_obj: client.VaultClientBase, text: bool, name: str):
+def get(client_obj: client.VaultClientBase, text: bool, key: Optional[str], name: str):
     """
     Return a single secret value.
     """
     secret = client_obj.get_secret(path=name)
+    if key is not None:
+        secret = secret.get(key)
     force_yaml = isinstance(secret, list) or isinstance(secret, dict)
     if text and not force_yaml:
         if secret is None:
@@ -230,14 +234,24 @@ def get(client_obj: client.VaultClientBase, text: bool, name: str):
     )
 
 
+def build_kv(values):
+    try:
+        return dict(item.split("=", 1) for item in values)
+    except ValueError:
+        raise click.BadParameter("attributes need to be in format name=value")
+
+
 @cli.command("set")
 @click.pass_obj
-@click.option("--yaml", "format_yaml", is_flag=True)
 @click.option(
+    "--yaml", "format_yaml", is_flag=True, help="load stdin input as yaml format"
+)
+@click.option(
+    "-p",
     "--prompt",
-    is_flag=True,
-    default=False,
-    help="Prompt user for value using a hidden input.",
+    multiple=True,
+    metavar="KEY",
+    help="Prompt user for a value for KEY using a hidden input. Can be used multiple times if you want to add multiple key/value pairs.",
 )
 @click.option("--stdin/--no-stdin", default=False)
 @click.option(
@@ -249,27 +263,27 @@ def get(client_obj: client.VaultClientBase, text: bool, name: str):
     "(this is necessary only if --safe-write is set).",
 )
 @click.argument("name")
-@click.argument("value", nargs=-1)
+@click.argument("attributes", nargs=-1, metavar="[name=value...]")
 @handle_errors()
 def set_(
     client_obj: client.VaultClientBase,
     format_yaml: bool,
-    prompt: bool,
+    prompt: Sequence[str],
     stdin: bool,
     name: str,
-    value: Sequence[str],
+    attributes: Sequence[str],
     force: Optional[bool],
 ):
     """
-    Set a single secret to the given value(s).
+    Set a secret.
 
     Value can be either passed as argument (several arguments will be
     interpreted as a list) or via stdin with the --stdin flag.
     """
-    if prompt and value:
+    if prompt and attributes:
         raise click.UsageError("Can't set both --prompt and a value")
 
-    if stdin and value:
+    if stdin and attributes:
         raise click.UsageError("Can't set both --stdin and a value")
 
     if stdin and prompt:
@@ -277,21 +291,19 @@ def set_(
 
     final_value: types.JSONValue
     if stdin:
-        final_value = click.get_text_stream("stdin").read().strip()
+        inputstr = click.get_text_stream("stdin").read().strip()
+        if format_yaml:
+            final_value = yaml.safe_load(inputstr)
+        else:
+            final_value = build_kv(shlex.split(inputstr))
     elif prompt:
-        final_value = click.prompt(
-            f"Please enter value for `{name}`", hide_input=True
-        ).strip()
-
-    elif len(value) == 1:
-        final_value = value[0]
-
+        final_value = {}
+        for key in prompt:
+            final_value[key] = click.prompt(
+                f"Please enter a value for `{name}[{key}]`", hide_input=True
+            ).strip()
     else:
-        final_value = list(value)
-
-    if format_yaml:
-        assert isinstance(final_value, str)
-        final_value = yaml.safe_load(final_value)
+        final_value = build_kv(attributes)
 
     try:
         client_obj.set_secret(path=name, value=final_value, force=force)
@@ -361,9 +373,10 @@ def env(
         env_secrets.update(
             {
                 environment.make_env_key(
-                    path=path, prefix=prefix, key=key
+                    base_path=path, path=subpath, prefix=prefix, name=name
                 ): environment.make_env_value(value)
-                for key, value in secrets.items()
+                for subpath, values in secrets.items()
+                for name, value in values.items()
             }
         )
 

@@ -131,15 +131,16 @@ def test_vault_client_base_get_all_secrets(vault):
 
     result = vault.get_all_secrets("a", "")
 
-    assert result == {"a": {"c": "secret-ac"}, "b": "secret-b"}
+    assert result == {"a": {"c": {"value": "secret-ac"}}, "b": {"value": "secret-b"}}
 
     result = vault.get_all_secrets("a")
 
-    assert result == {"a": {"c": "secret-ac"}}
+    assert result == {"a": {"c": {"value": "secret-ac"}}}
 
 
 @pytest.mark.parametrize(
-    "input, expected", [("a", {"a/c": "secret-ac"}), ("b", {"b": "secret-b"})]
+    "input, expected",
+    [("a", {"a/c": {"value": "secret-ac"}}), ("b", {"b": {"value": "secret-b"}})],
 )
 def test_vault_client_base_get_secrets(vault, input, expected):
     vault.db = {"a/c": {"value": "secret-ac"}, "b": {"value": "secret-b"}}
@@ -186,9 +187,9 @@ def test_vault_client_base_context_manager(vault):
 
 def test_vault_client_set_secret(vault):
 
-    vault.set_secret("a/b", "c")
+    vault.set_secret("a/b", {"name": "value"})
 
-    assert vault.db == {"a/b": {"value": "c"}}
+    assert vault.db == {"a/b": {"name": "value"}}
 
 
 @pytest.mark.parametrize(
@@ -200,7 +201,7 @@ def test_vault_client_set_secret_overwrite_invalid(vault, safe_write, force):
     vault.safe_write = safe_write
 
     with pytest.raises(exceptions.VaultOverwriteSecretError):
-        vault.set_secret("a/b", "c", force=force)
+        vault.set_secret("a/b", {"value": "c"}, force=force)
 
     assert vault.db == {"a/b": {"value": "d"}}
 
@@ -214,7 +215,7 @@ def test_vault_client_set_secret_overwrite_valid(vault, safe_write, force, value
     vault.db = {"a/b": {"value": "d"}}
     vault.safe_write = safe_write
 
-    vault.set_secret("a/b", value, force=force)
+    vault.set_secret("a/b", {"value": value}, force=force)
 
     assert vault.db == {"a/b": {"value": value}}
 
@@ -224,7 +225,7 @@ def test_vault_client_set_secret_when_there_are_existing_secrets_beneath_path(va
     vault.db = {"a/b/c": {"value": "d"}}
 
     with pytest.raises(exceptions.VaultMixSecretAndFolder):
-        vault.set_secret("a/b", "e")
+        vault.set_secret("a/b", {"value": "e"})
 
     assert vault.db == {"a/b/c": {"value": "d"}}
 
@@ -234,7 +235,7 @@ def test_vault_client_set_secret_when_a_parent_is_an_existing_secret(vault):
     vault.db = {"a": {"value": "c"}}
 
     with pytest.raises(exceptions.VaultMixSecretAndFolder):
-        vault.set_secret("a/b", "d")
+        vault.set_secret("a/b", {"value": "d"})
 
     assert vault.db == {"a": {"value": "c"}}
 
@@ -246,7 +247,7 @@ def test_vault_client_set_secret_read_not_allowed(vault, caplog):
     vault.db = {}
     vault.forbidden_get_paths.add("a/b")
 
-    vault.set_secret("a/b", "c")
+    vault.set_secret("a/b", {"value": "c"})
 
     assert vault.db == {"a/b": {"value": "c"}}
 
@@ -260,7 +261,7 @@ def test_vault_client_set_secret_list_not_allowed(vault, caplog):
     vault.db = {}
     vault.forbidden_list_paths.add("a/b")
 
-    vault.set_secret("a/b", "c")
+    vault.set_secret("a/b", {"value": "c"})
 
     assert vault.db == {"a/b": {"value": "c"}}
 
@@ -274,7 +275,7 @@ def test_vault_client_set_secret_read_parent_not_allowed(vault, caplog):
     vault.db = {}
     vault.forbidden_get_paths.add("a")
 
-    vault.set_secret("a/b", "c")
+    vault.set_secret("a/b", {"value": "c"})
 
     assert vault.db == {"a/b": {"value": "c"}}
 
@@ -335,7 +336,7 @@ def test_vault_client_base_render_template(vault):
 
     vault.db = {"a/b": {"value": "c"}}
 
-    assert vault.render_template("Hello {{ vault('a/b') }}") == "Hello c"
+    assert vault.render_template("Hello {{ vault('a/b').value }}") == "Hello c"
 
 
 def test_vault_client_base_render_template_path_not_found(vault):
@@ -347,33 +348,39 @@ def test_vault_client_base_render_template_path_not_found(vault):
     "vault_contents, expected",
     [
         # Secret is not a template
-        ({"a": {"value": "b"}}, "b"),
+        ({"a": {"value": "b"}}, {"value": "b"}),
         # Secret not a string
-        ({"a": {"value": ["yay"]}}, ["yay"]),
+        ({"a": {"value": ["yay"]}}, {"value": ["yay"]}),
         # Secret is a template without variable expansion
-        ({"a": {"value": "!template!b"}, "b": {"value": "c"}}, "b"),
+        ({"a": {"value": "!template!b"}, "b": {"value": "c"}}, {"value": "b"}),
         # Secret is a template
-        ({"a": {"value": "!template!{{ vault('b') }}"}, "b": {"value": "c"}}, "c"),
+        (
+            {"a": {"value": "!template!{{ vault('b').value }}"}, "b": {"value": "c"}},
+            {"value": "c"},
+        ),
         # Finite recursion
         (
             {
-                "a": {"value": "!template!{{ vault('b') }}"},
-                "b": {"value": "!template!{{ vault('c') }}"},
+                "a": {"value": "!template!{{ vault('b').value }}"},
+                "b": {"value": "!template!{{ vault('c').value }}"},
                 "c": {"value": "d"},
             },
-            "d",
+            {"value": "d"},
         ),
         # Infinite Recursion
         (
             {
-                "a": {"value": "!template!{{ vault('b') }}"},
-                "b": {"value": "!template!{{ vault('c') }}"},
-                "c": {"value": "!template!{{ vault('a') }}"},
+                "a": {"value": "!template!{{ vault('b').value }}"},
+                "b": {"value": "!template!{{ vault('c').value }}"},
+                "c": {"value": "!template!{{ vault('a').value }}"},
             },
-            '<recursive value "a">',
+            {"value": '<recursive value "a">'},
         ),
         # Direct Recursion
-        ({"a": {"value": "!template!{{ vault('a') }}"}}, '<recursive value "a">'),
+        (
+            {"a": {"value": "!template!{{ vault('a').value }}"}},
+            {"value": '<recursive value "a">'},
+        ),
     ],
 )
 def test_vault_client_base_get_secret(vault, vault_contents, expected):
@@ -384,17 +391,14 @@ def test_vault_client_base_get_secret(vault, vault_contents, expected):
 
 def test_vault_client_base_get_secret_template_root(vault):
     vault.base_path = "base"
-    vault.db = {"/base/a": {"value": '!template!{{vault("a")}} yay'}}
+    vault.db = {"/base/a": {"value": '!template!{{ vault("a").value }} yay'}}
 
     # In case of erroneous caching, e.g. a different cache entry
     # for /base/a and base/a, we would find '<recursive value "a"> yay yay'
-    assert vault.get_secret("/base/a") == '<recursive value "a"> yay'
+    assert vault.get_secret("/base/a") == {"value": '<recursive value "a"> yay'}
 
 
-def test_vault_client_base_get_secret_no_value(vault):
-    # the secret has no "value" key. This can not happen when the variable is
-    # set with vault-cli but can if set from another client or if we are using
-    # the rabbitmq engine
+def test_vault_client_base_get_secret_multiple_keys(vault):
     vault.db = {"rabbitmq/creds/role": {"username": "foo", "password": "bar"}}
     assert vault.get_secret("rabbitmq/creds/role") == {
         "username": "foo",
@@ -406,11 +410,11 @@ def test_vault_client_base_get_secret_with_dict(vault):
     vault.db = {
         "credentials": {"value": {"username": "foo", "password": "bar"}},
         "dsn": {
-            "value": "!template!proto://{{ vault('credentials')['username'] }}:{{ vault('credentials').password }}@host"
+            "value": "!template!proto://{{ vault('credentials')['value']['username'] }}:{{ vault('credentials').value.password }}@host"
         },
     }
 
-    assert vault.get_secret("dsn") == "proto://foo:bar@host"
+    assert vault.get_secret("dsn") == {"value": "proto://foo:bar@host"}
 
 
 def test_vault_client_base_get_secret_not_found(vault):
@@ -428,7 +432,10 @@ def test_vault_client_base_get_secrets_error(vault):
     vault.db = {"a": {"value": "b"}, "c": {"value": "d"}}
     vault.forbidden_get_paths = {"c"}
 
-    assert vault.get_secrets("") == {"a": "b", "c": "<error while retrieving secret>"}
+    assert vault.get_secrets("") == {
+        "a": {"value": "b"},
+        "c": "<error while retrieving secret>",
+    }
 
 
 @pytest.mark.parametrize(
@@ -442,12 +449,12 @@ def test_vault_client_base_get_secrets_error(vault):
         ("list_secrets", ["/foo"], {"path": "/foo"}),
         (
             "set_secret",
-            ["foo", "value"],
+            ["foo", {"value": "value"}],
             {"path": "/base/foo", "secret": {"value": "value"}},
         ),
         (
             "set_secret",
-            ["/foo", "value"],
+            ["/foo", {"value": "value"}],
             {"path": "/foo", "secret": {"value": "value"}},
         ),
     ],
@@ -484,10 +491,10 @@ def test_vault_client_base_base_path(vault, path, expected):
 
 def test_vault_client_base_get_secret_implicit_cache_ends(vault):
     vault.db = {"a": {"value": "b"}}
-    assert vault.get_secret("a") == "b"
+    assert vault.get_secret("a") == {"value": "b"}
     vault.db = {"a": {"value": "c"}}
     # Value updated. Cache was just for the duration of the call
-    assert vault.get_secret("a") == "c"
+    assert vault.get_secret("a") == {"value": "c"}
 
 
 class RaceConditionTestVaultClient(testing.TestVaultClient):
@@ -517,7 +524,7 @@ def test_vault_client_base_get_secret_implicit_cache_no_race_condition():
     vault.db = {"d": {"value": """!template!{{ vault("a").b }}-{{ vault("a").c }}"""}}
 
     # b2-c3 would be the value if caching didn't work.
-    assert vault.get_secret("d") == "b2-c2"
+    assert vault.get_secret("d") == {"value": "b2-c2"}
 
 
 def test_vault_client_base_get_secrets_implicit_cache_no_race_condition():
@@ -531,13 +538,16 @@ def test_vault_client_base_get_secrets_implicit_cache_no_race_condition():
         "d": {"value": """!template!{{ vault("a").b }}-{{ vault("a").c }}"""},
     }
 
-    assert vault.get_secrets("") == {"a": {"b": "b0", "c": "c0"}, "d": "b0-c0"}
+    assert vault.get_secrets("") == {
+        "a": {"b": "b0", "c": "c0"},
+        "d": {"value": "b0-c0"},
+    }
 
 
 def test_vault_client_base_get_secret_explicit_cache(vault):
     vault.db = {"a": {"value": "b"}}
     with vault.caching():
-        assert vault.get_secret("a") == "b"
+        assert vault.get_secret("a") == {"value": "b"}
         vault.db = {"a": {"value": "c"}}
         # Value not updated
-        assert vault.get_secret("a") == "b"
+        assert vault.get_secret("a") == {"value": "b"}

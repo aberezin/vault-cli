@@ -6,14 +6,14 @@ from typing import Dict, NoReturn, Optional, Sequence
 from vault_cli import types
 
 
-def make_env_key(path: str, prefix: Optional[str], key: str) -> str:
+def make_env_key(base_path: str, path: str, name: str, prefix: Optional[str]) -> str:
     if prefix:
-        relative = pathlib.Path(prefix) / pathlib.Path(key).relative_to(
-            pathlib.Path(path)
+        relative = pathlib.Path(prefix) / pathlib.Path(path).relative_to(
+            pathlib.Path(base_path)
         )
     else:
-        relative = pathlib.Path(key).relative_to(pathlib.Path(path).parent)
-    return str(relative).upper().replace("/", "_")
+        relative = pathlib.Path(path).relative_to(pathlib.Path(base_path).parent)
+    return f"{relative!s}_{name}".upper().replace("/", "_")
 
 
 def make_env_value(value: types.JSONValue) -> str:
